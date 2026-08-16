@@ -7,7 +7,7 @@
 
 ## 安装步骤
 1. 打开 ComfyUI/custom_nodes/ 文件夹
-2. 新建文件夹 `huis_player_api_batch`
+2. 新建文件夹 `ComfyUI-HuiShi-APIPreset`
 3. 将4个文件放入文件夹内
 4. 重启 ComfyUI，左侧节点栏「绘世玩家/API批量工具」找到节点
 
