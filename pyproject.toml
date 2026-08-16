@@ -1,0 +1,14 @@
+[project]
+name = "ComfyUI-HuiShi-APIPreset"
+version = "1.0.0"
+description = "API batch template nodes for ComfyUI, includes 11 kinds of AI generation parameter templates, public param attach node & file loader nodes (image/video/audio) to export standardized JSON placeholder configs"
+license = { text = "LICENSE" }
+requires-python = ">=3.10"
+
+[project.urls]
+Repository = "https://github.com/HuiShiPlayer/ComfyUI-HuiShi-APIPreset"
+
+[tool.comfy]
+PublisherId = "huisplayer"
+DisplayName = "HuiShi API Preset Nodes"
+Icon = ""
