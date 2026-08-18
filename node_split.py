@@ -14,6 +14,16 @@ PARAM_JSON_PATH = os.path.join(CUR_DIR, "param.json")
 with open(PARAM_JSON_PATH, "r", encoding="utf-8") as f:
     ALL_API_CFG = json.load(f)
 SKIP_VAR_SET = {"param1","param2","param3","param4","param5"}
+
+
+def is_template_placeholder(s: str) -> bool:
+    """判断字符串是否为API模板占位符 ###{{[[xxx]]}}###"""
+    if not isinstance(s, str):
+        return False
+    s_strip = s.strip()
+    return s_strip.startswith("###{{[[") and s_strip.endswith("]]}}###")
+
+
 # ==============================================================================
 # 附加公共参数节点：param1~param5
 # ==============================================================================
@@ -28,6 +38,7 @@ class Huis_CommonParamAttach:
     @classmethod
     def INPUT_TYPES(cls):
         req = {}
+        opt = {}
         common_params = [
             ("param1", "【通用参数1】"),
             ("param2", "【通用参数2】"),
@@ -38,27 +49,33 @@ class Huis_CommonParamAttach:
         for var, label_cn in common_params:
             label_key = f"{var}_label"
             box_key = f"{var}_box"
+            # label只读文本放required（仅展示）
             req[label_key] = ("STRING", {
                 "default": f"{label_cn} ({var})",
                 "readonly": True,
                 "multiline": False
             })
-            req[box_key] = ("STRING", {
+            # 实际输入框放到optional，不再强制必填，消除missing报错
+            opt[box_key] = ("STRING", {
                 "default": f"###{{{{[[{var}]]}}}}###",
                 "multiline": False,
-                "tooltip": "API通用占位符，导出JSON使用"
+                "tooltip": "API通用占位符，导出JSON使用；运行工作流时代表null/不传参"
             })
-        return {"required": req}
+        return {"required": req, "optional": opt}
+
     def pass_common(self, **kwargs):
+        def get_val(k):
+            return kwargs.get(k, f"###{{{{[[{k.replace('_box','')}]]}}}}###")
         return (
-            kwargs["param1_box"],
-            kwargs["param2_box"],
-            kwargs["param3_box"],
-            kwargs["param4_box"],
-            kwargs["param5_box"],
+            get_val("param1_box"),
+            get_val("param2_box"),
+            get_val("param3_box"),
+            get_val("param4_box"),
+            get_val("param5_box"),
         )
+
 # ==============================================================================
-# 工厂函数：过滤 param1‑param5，label去掉菱形符号
+# 工厂函数：过滤 param1‑param5，label放在required，输入框放到optional
 # ==============================================================================
 def create_api_param_node(api_key: str, display_name: str, class_name: str):
     cfg_data = ALL_API_CFG[api_key]
@@ -83,6 +100,7 @@ def create_api_param_node(api_key: str, display_name: str, class_name: str):
         @classmethod
         def INPUT_TYPES(cls):
             req = {}
+            opt = {}
             for raw_label in raw_item_list:
                 var_name = raw_label.split("【")[0] if "【" in raw_label else raw_label
                 default_placeholder = f"###{{{{[[{var_name}]]}}}}###"
@@ -93,23 +111,30 @@ def create_api_param_node(api_key: str, display_name: str, class_name: str):
                     show_label = f"{raw_label}"
                 label_k = f"{var_name}_label"
                 box_k = f"{var_name}_box"
+                # 只读标签放required
                 req[label_k] = ("STRING", {
                     "default": show_label,
                     "readonly": True,
                     "multiline": False
                 })
-                req[box_k] = ("STRING", {
+                # 参数输入框放到optional，消除 Required input is missing 报错
+                opt[box_k] = ("STRING", {
                     "default": default_placeholder,
                     "multiline": False,
-                    "tooltip": f"API字段 {var_name} 占位符，导出JSON专用"
+                    "tooltip": f"API字段 {var_name} 占位符；导出JSON使用；运行工作流代表null/不传参"
                 })
-            return {"required": req}
+            return {"required": req, "optional": opt}
+
         def forward(self, **kwargs):
             outs = []
             for var in var_list:
-                outs.append(kwargs[f"{var}_box"])
+                box_k = f"{var}_box"
+                # optional不传时，回退为占位符字符串
+                val = kwargs.get(box_k, f"###{{{{[[{var}]]}}}}###")
+                outs.append(val)
             return tuple(outs)
     return APINode
+
 # ==============================================================================
 # 11个独立API参数节点
 # ==============================================================================
@@ -168,6 +193,7 @@ Table_ThreeImgRef = create_api_param_node(
     display_name="绘世玩家-参数表：三图参考",
     class_name="绘世玩家_参数表_三图参考"
 )
+
 # ==============================================================================
 # 通用占位符输出节点
 # ==============================================================================
@@ -183,7 +209,7 @@ class Huis_PlaceholderOutput:
                     "default": "",
                     "multiline": False,
                     "tooltip": """
-1.模板占位符：###{{[[xxx]]}}###（执行阻断，仅导出JSON）
+1.模板占位符：###{{[[xxx]]}}### → 运行返回None（代表null/不传），导出JSON识别为null
 2.普通文本：masterpiece
 3.整数：1024
 4.小数：7.5
@@ -201,8 +227,9 @@ class Huis_PlaceholderOutput:
     FUNCTION = "run"
     def run(self, 原始输入, 导出字段类型):
         raw = str(原始输入).strip()
-        if raw.startswith("###{{[[") and raw.endswith("]]}}###"):
-            raise RuntimeError("[API模板占位符] 当前为模板标记，禁止执行工作流，请只导出JSON！")
+        if is_template_placeholder(raw):
+            return (None,)
+
         val = raw
         try:
             val = int(raw)
@@ -212,6 +239,7 @@ class Huis_PlaceholderOutput:
             except ValueError:
                 val = raw
         return (val,)
+
 # ==============================================================================
 # 加载图片节点
 # ==============================================================================
@@ -266,6 +294,7 @@ class Huis_LoadImageByName:
         batch_mask = torch.cat(output_masks, dim=0)
         img.close()
         return (batch_img, batch_mask)
+
 # ==============================================================================
 # 加载视频节点
 # ==============================================================================
@@ -298,6 +327,7 @@ class Huis_LoadVideoByName:
         if not os.path.exists(vid_path):
             raise FileNotFoundError(f"视频不存在！完整路径：{vid_path}\n请确认文件放在ComfyUI input文件夹内")
         return (vid_path,)
+
 # ==============================================================================
 # 加载音频节点
 # ==============================================================================
@@ -326,6 +356,7 @@ class Huis_LoadAudioByName:
         if not os.path.exists(aud_path):
             raise FileNotFoundError(f"音频不存在！完整路径：{aud_path}\n请确认文件放在ComfyUI input文件夹内")
         return (aud_path,)
+
 # ==============================================================================
 # 节点映射表
 # ==============================================================================
